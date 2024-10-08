@@ -18,7 +18,12 @@ public class DeviceInfo {
     }
 
     public static String getAndroidPatchLevel() {
-        return Build.VERSION.SECURITY_PATCH;
+        // Ensure SECURITY_PATCH is accessed only on API 23+ (Marshmallow)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            return Build.VERSION.SECURITY_PATCH;
+        } else {
+            return "Patch level not available"; // Return default message for API levels below 23
+        }
     }
 
     public static String getKernelVersion() {

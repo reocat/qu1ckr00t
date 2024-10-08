@@ -3,16 +3,13 @@ package de.hernan.qu1ckr00t;
 import android.app.Activity;
 import android.graphics.Color;
 import android.graphics.PorterDuff;
-import android.os.AsyncTask;
 import android.os.Bundle;
-import android.os.Environment;
-import android.text.Editable;
-import android.text.Selection;
+import android.os.Handler;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.method.ScrollingMovementMethod;
 import android.text.style.StyleSpan;
-import android.view.View;
+//import android.view.View;
 import android.widget.Button;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -23,6 +20,11 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import de.hernan.qu1ckr00t.R;
+import de.hernan.qu1ckr00t.DeviceInfo;
 
 public class MainActivity extends Activity {
 
@@ -34,52 +36,51 @@ public class MainActivity extends Activity {
     ScrollView scrollView;
     TextView deviceInfo;
 
+    private ExecutorService executorService;
+    private Handler uiHandler;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        rootButton = (Button) findViewById(R.id.button);
-        textView = (TextView)findViewById(R.id.textView2);
-        deviceInfo = (TextView)findViewById(R.id.deviceInfo);
-        scrollView = (ScrollView)findViewById(R.id.scrollView2);
+        rootButton = findViewById(R.id.button); // No casting needed
+        textView = findViewById(R.id.textView2); // No casting needed
+        deviceInfo = findViewById(R.id.deviceInfo); // No casting needed
+        scrollView = findViewById(R.id.scrollView2); // No casting needed
+
+        executorService = Executors.newSingleThreadExecutor();
+        uiHandler = new Handler(getMainLooper());
 
         SpannableStringBuilder ssb = new SpannableStringBuilder();
-        addLabel(ssb, "Device", String.format("%s (Android %s)", DeviceInfo.getDeviceName(), DeviceInfo.getAndroidVersion()));
-        addLabel(ssb, "Kernel", String.format("%s (%s)", DeviceInfo.getKernelVersion(), DeviceInfo.getDeviceArchitecture()));
-        addLabel(ssb, "Patch", DeviceInfo.getAndroidPatchLevel());
-        addLabel(ssb, "Fingerprint", DeviceInfo.getBuildFingerprint());
+        addLabel(ssb, getString(R.string.device_label),
+                String.format("%s (Android %s)", DeviceInfo.getDeviceName(), DeviceInfo.getAndroidVersion()));
+        addLabel(ssb, getString(R.string.kernel_label),
+                String.format("%s (%s)", DeviceInfo.getKernelVersion(), DeviceInfo.getDeviceArchitecture()));
+        addLabel(ssb, getString(R.string.patch_label), DeviceInfo.getAndroidPatchLevel());
+        addLabel(ssb, getString(R.string.fingerprint_label), DeviceInfo.getBuildFingerprint());
 
         deviceInfo.setText(ssb);
-
         textView.setMovementMethod(new ScrollingMovementMethod());
 
-        rootButton.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                rootButton.setText("Rooting...");
-                addStatus("Starting root process");
-                rootButton.setClickable(false);
-                rootButton.getBackground().setColorFilter(Color.GRAY, PorterDuff.Mode.MULTIPLY);
-                new POCTask().execute();
-
-            }
+        rootButton.setOnClickListener(v -> {
+            rootButton.setText(getString(R.string.rooting_text));
+            addStatus(getString(R.string.starting_root_process));
+            rootButton.setClickable(false);
+            rootButton.getBackground().setColorFilter(Color.GRAY, PorterDuff.Mode.MULTIPLY);
+            startRootingProcess();
         });
     }
 
-    private static void addLabel(SpannableStringBuilder ssb, String label, String text)
-    {
+    private static void addLabel(SpannableStringBuilder ssb, String label, String text) {
         int start = ssb.length();
-        ssb.append(label + ": ");
+        ssb.append(label).append(": ");
         ssb.setSpan(new StyleSpan(android.graphics.Typeface.BOLD), start, ssb.length(), Spanned.SPAN_INCLUSIVE_EXCLUSIVE);
-        ssb.append(text + "\n");
+        ssb.append(text).append("\n");
     }
 
-    private void addStatus(String status)
-    {
-        textView.append(status + "\n");
-
-        // auto scroll: https://stackoverflow.com/a/34866634/5768099
+    private void addStatus(String status) {
+        textView.setText(textView.getText().toString() + status + "\n");
         int bottom = textView.getBottom() + scrollView.getPaddingBottom();
         int sy = scrollView.getScrollY();
         int sh = scrollView.getHeight();
@@ -88,93 +89,82 @@ public class MainActivity extends Activity {
         scrollView.smoothScrollBy(0, delta);
     }
 
-    private class POCTask extends AsyncTask<String, String, Boolean> {
-        protected Boolean doInBackground(String... programs) {
+    private void startRootingProcess() {
+        executorService.execute(() -> {
             extractPoc();
             extractMagisk();
 
             try {
-                String [] args = {pocPath, "shell_exec", magiskInstPath + " " + magiskPath};
-                if(!executeNativeCode(args)) {
-                    publishProgress("Rooting native execution failed");
-                    return false;
-                }
-
-                return true;
-            } catch(IOException ie) {
-                addStatus(ie.toString());
-                return false;
-            } catch(InterruptedException io) {
-                addStatus(io.toString());
-                return false;
+                String[] args = {pocPath, "shell_exec", magiskInstPath + " " + magiskPath};
+                boolean success = executeNativeCode(args);
+                uiHandler.post(() -> onRootingFinished(success));
+            } catch (IOException | InterruptedException e) {
+                uiHandler.post(() -> addStatus(e.toString()));
             }
+        });
+    }
+
+    private void extractPoc() {
+        InputStream poc = getResources().openRawResource(R.raw.poc);
+        File pocDir = getApplicationContext().getFilesDir();
+        File pocFile = new File(pocDir, "do_root");
+        pocPath = pocFile.getPath();
+        uiHandler.post(() -> addStatus(getString(R.string.extracting_native_code)));
+        copyFile(poc, pocFile.getPath());
+        if (!pocFile.setExecutable(true)) {
+            uiHandler.post(() -> addStatus(getString(R.string.failed_to_set_executable)));
+        }
+    }
+
+    private void extractMagisk() {
+        uiHandler.post(() -> addStatus(getString(R.string.extracting_magisk)));
+
+        InputStream magisk = getResources().openRawResource(R.raw.magiskinit64);
+        File fileDir = getApplicationContext().getFilesDir();
+        File magiskFile = new File(fileDir, "magiskinit64");
+        magiskPath = magiskFile.getPath();
+        copyFile(magisk, magiskPath);
+        if (!magiskFile.setExecutable(true)) {
+            uiHandler.post(() -> addStatus(getString(R.string.failed_to_set_executable)));
         }
 
-        private void extractPoc()
-        {
-            InputStream poc = getResources().openRawResource(R.raw.poc);
-            File pocDir = getApplicationContext().getFilesDir();
-            File pocFile = new File(pocDir, "do_root");
-            pocPath = pocFile.getPath();
-            publishProgress("Extracting native code from APK...");
-            copyFile(poc, pocFile.getPath());
-            pocFile.setExecutable(true);
+        uiHandler.post(() -> addStatus(getString(R.string.extracting_installer)));
+
+        InputStream magiskInst = getResources().openRawResource(R.raw.magisk_install);
+        File magiskInstFile = new File(fileDir, "magisk_install");
+        magiskInstPath = magiskInstFile.getPath();
+        copyFile(magiskInst, magiskInstPath);
+        if (!magiskInstFile.setExecutable(true)) {
+            uiHandler.post(() -> addStatus(getString(R.string.failed_to_set_executable)));
+        }
+    }
+
+    private boolean executeNativeCode(String[] args) throws IOException, InterruptedException {
+        uiHandler.post(() -> addStatus(getString(R.string.executing_native_binary)));
+        Process nativeApp = Runtime.getRuntime().exec(args);
+
+        BufferedReader reader = new BufferedReader(new InputStreamReader(nativeApp.getInputStream()));
+
+        String str;
+        while ((str = reader.readLine()) != null) {
+            String finalStr = str;
+            uiHandler.post(() -> addStatus("[NATIVE] " + finalStr));
         }
 
-        private void extractMagisk()
-        {
-            publishProgress("Extracting Magisk...");
+        reader.close();
+        nativeApp.waitFor();
+        return nativeApp.exitValue() == 0;
+    }
 
-            InputStream magisk = getResources().openRawResource(R.raw.magiskinit64);
-            File fileDir = getApplicationContext().getFilesDir();
-            // XXX: hardcoded to 64 bit
-            File magiskFile = new File(fileDir, "magiskinit64");
-            magiskPath = magiskFile.getPath();
-            copyFile(magisk, magiskPath);
-            magiskFile.setExecutable(true);
-
-            publishProgress("Extracting installer...");
-
-            InputStream magiskInst = getResources().openRawResource(R.raw.magisk_install);
-            File magiskInstFile = new File(fileDir, "magisk_install");
-            magiskInstPath = magiskInstFile.getPath();
-            copyFile(magiskInst, magiskInstPath);
-            magiskInstFile.setExecutable(true);
-        }
-
-        private boolean executeNativeCode(String [] args) throws IOException, InterruptedException {
-            publishProgress("Executing native root binary...");
-            Process nativeApp = Runtime.getRuntime().exec(args);
-
-            BufferedReader reader = new BufferedReader(new InputStreamReader(nativeApp.getInputStream()));
-
-            String str;
-            while((str=reader.readLine())!=null) {
-                publishProgress("[NATIVE] " + str);
-            }
-
-            reader.close();
-
-            // Waits for the command to finish.
-            nativeApp.waitFor();
-            return nativeApp.exitValue() == 0;
-        }
-
-        protected void onProgressUpdate(String... updates) {
-            addStatus(updates[0]);
-        }
-
-        protected void onPostExecute(Boolean result) {
-            if (!result) {
-                addStatus("Root failed :(\n");
-
-                rootButton.setText("Root");
-                rootButton.setClickable(true);
-                rootButton.getBackground().setColorFilter(null);
-            } else {
-                addStatus("Enjoy your rooted device!");
-                rootButton.setText("Rooted");
-            }
+    private void onRootingFinished(boolean success) {
+        if (!success) {
+            addStatus(getString(R.string.root_failed));
+            rootButton.setText(getString(R.string.root));
+            rootButton.setClickable(true);
+            rootButton.getBackground().setColorFilter(null);
+        } else {
+            addStatus(getString(R.string.root_success));
+            rootButton.setText(getString(R.string.rooted));
         }
     }
 
@@ -188,7 +178,6 @@ public class MainActivity extends Activity {
             }
             out.close();
             in.close();
-
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

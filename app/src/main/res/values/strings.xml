@@ -1,3 +1,19 @@
 <resources>
     <string name="app_name">Qu1ckR00t</string>
+    <string name="device_label">Device</string>
+    <string name="kernel_label">Kernel</string>
+    <string name="patch_label">Patch</string>
+    <string name="fingerprint_label">Fingerprint</string>
+    <string name="rooting_text">Rooting...</string>
+    <string name="starting_root_process">Starting root process</string>
+    <string name="rooting_native_execution_failed">Rooting native execution failed</string>
+    <string name="extracting_native_code">Extracting native code from APK...</string>
+    <string name="failed_to_set_executable">Failed to set executable permission.</string>
+    <string name="extracting_magisk">Extracting Magisk...</string>
+    <string name="extracting_installer">Extracting installer...</string>
+    <string name="executing_native_binary">Executing native root binary...</string>
+    <string name="root_failed">Root failed :(</string>
+    <string name="root">Root</string>
+    <string name="root_success">Enjoy your rooted device!</string>
+    <string name="rooted">Rooted</string>
 </resources>
